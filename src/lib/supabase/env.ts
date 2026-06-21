@@ -59,7 +59,7 @@ export function getSupabaseServerEnvironment(): SupabaseServerEnvironment {
 export function getSupabaseAdminEnvironment(): SupabaseAdminEnvironment {
   const serverEnvironment = getSupabaseServerEnvironment();
   const adminKey =
-    process.env.SUPABASE_SECRET_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY;
+    process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_SECRET_KEY;
 
   const validatedAdminKey = requireEnvironmentVariable(
     "SUPABASE_SECRET_KEY or SUPABASE_SERVICE_ROLE_KEY",
