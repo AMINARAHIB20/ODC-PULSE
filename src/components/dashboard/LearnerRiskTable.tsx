@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 import { Badge } from "@/components/ui/badge";
 import {
   Table,
@@ -68,7 +70,12 @@ export function LearnerRiskTable({ learners }: LearnerRiskTableProps) {
         {learners.map((learner) => (
           <TableRow key={learner.id}>
             <TableCell>
-              <div className="font-medium">{learner.name}</div>
+              <Link
+                href={`/learners/${learner.id}`}
+                className="font-medium hover:text-orange-600 hover:underline"
+              >
+                {learner.name}
+              </Link>
               <div className="text-xs text-muted-foreground">
                 {learner.learnerCode}
               </div>
