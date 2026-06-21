@@ -1,13 +1,16 @@
 import "server-only";
 
 import { createServerClient } from "@supabase/ssr";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 
-import { getSupabaseEnvironment } from "./env";
+import { getSupabaseServerEnvironment } from "./env";
 
-export async function createSupabaseServerClient() {
+export type SupabaseServerClient = SupabaseClient;
+
+export async function createSupabaseServerClient(): Promise<SupabaseServerClient> {
   const cookieStore = await cookies();
-  const { url, publishableKey } = getSupabaseEnvironment();
+  const { url, publishableKey } = getSupabaseServerEnvironment();
 
   return createServerClient(url, publishableKey, {
     cookies: {
@@ -20,8 +23,8 @@ export async function createSupabaseServerClient() {
             cookieStore.set(name, value, options);
           });
         } catch {
-          // Server Components cannot write cookies. Route Handlers and Server
-          // Actions can, and will persist refreshed authentication sessions.
+          // Expected during Server Component rendering. Route Handlers and
+          // Server Actions can write and persist refreshed auth cookies.
         }
       },
     },
