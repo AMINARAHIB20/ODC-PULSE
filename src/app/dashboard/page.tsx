@@ -5,7 +5,6 @@ import { KpiCard } from "@/components/dashboard/KpiCard";
 import {
   LearnerRiskTable,
   type LearnerRiskRow,
-  type LearnerRiskStatus,
 } from "@/components/dashboard/LearnerRiskTable";
 import {
   Card,
@@ -14,6 +13,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { calculateDropoutRisk } from "@/lib/scoring/dropoutRisk";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 interface LearnerRecord {
@@ -68,22 +68,6 @@ function getLearnerName(profile: LearnerRecord["profiles"]): string {
   }
 
   return profile?.full_name ?? "Unnamed learner";
-}
-
-function getRiskStatus(
-  attendanceRate: number,
-  quizScore: number,
-  employabilityScore: number,
-): LearnerRiskStatus {
-  if (attendanceRate < 70 || quizScore < 60 || employabilityScore < 60) {
-    return "high";
-  }
-
-  if (attendanceRate < 85 || quizScore < 75 || employabilityScore < 75) {
-    return "medium";
-  }
-
-  return "low";
 }
 
 async function getDashboardData(): Promise<DashboardResult> {
@@ -159,11 +143,10 @@ async function getDashboardData(): Promise<DashboardResult> {
         attendanceRate: roundedAttendance,
         quizScore: roundedQuiz,
         employabilityScore: roundedEmployability,
-        riskStatus: getRiskStatus(
-          roundedAttendance,
-          roundedQuiz,
-          roundedEmployability,
-        ),
+        riskStatus: calculateDropoutRisk({
+          attendanceRate: roundedAttendance,
+          quizAverage: roundedQuiz,
+        }).level,
         readyForInternship:
           roundedAttendance >= 80 &&
           roundedQuiz >= 75 &&
