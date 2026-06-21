@@ -1,6 +1,11 @@
+import OpenAI from "openai";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import {
+  generateEmployabilityAnalysis,
+  type EmployabilityAnalysisContext,
+} from "@/lib/ai/employability";
 import { findTopCompanyMatches, type CompanyOfferInput } from "@/lib/scoring/companyMatch";
 import { calculateEngagementScore } from "@/lib/scoring/engagement";
 import {
@@ -8,14 +13,13 @@ import {
   calculateTechnicalSkillsAverage,
 } from "@/lib/scoring/employability";
 import { calculateDropoutRisk } from "@/lib/scoring/dropoutRisk";
-import { getN8nEnvironment } from "@/lib/n8n/env";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
 
 const requestSchema = z
   .object({
-    learnerId: z.uuid(),
+    learner_id: z.uuid(),
   })
   .strict();
 
@@ -59,15 +63,6 @@ function firstRelation<T>(relation: T | T[] | null): T | null {
   return relation;
 }
 
-function isSuccessfulWebhookPayload(payload: unknown): boolean {
-  return (
-    !!payload &&
-    typeof payload === "object" &&
-    "success" in payload &&
-    payload.success === true
-  );
-}
-
 export async function POST(request: Request) {
   let requestBody: unknown;
 
@@ -84,14 +79,14 @@ export async function POST(request: Request) {
 
   if (!parsedRequest.success) {
     return NextResponse.json(
-      { error: "A valid learnerId is required." },
+      { error: "A valid learner_id is required." },
       { status: 400 },
     );
   }
 
   try {
     const supabase = createSupabaseAdminClient();
-    const { learnerId } = parsedRequest.data;
+    const learnerId = parsedRequest.data.learner_id;
     const learnerResult = await supabase
       .from("learners")
       .select(
@@ -180,7 +175,7 @@ export async function POST(request: Request) {
         ),
       ),
     );
-    const projectScore = roundMetric(
+    const projectAverage = roundMetric(
       average(projectRecords.map((record) => Number(record.score ?? 0))),
     );
     const technicalSkillsAverage = calculateTechnicalSkillsAverage(
@@ -191,12 +186,12 @@ export async function POST(request: Request) {
     const engagementScore = calculateEngagementScore({
       attendanceRate,
       quizAverage,
-      projectScore,
+      projectScore: projectAverage,
     });
     const employabilityScore = calculateEmployabilityScore({
       technicalSkillsAverage,
       quizAverage,
-      projectScore,
+      projectScore: projectAverage,
       attendanceRate,
     });
     const dropoutRisk = calculateDropoutRisk({ attendanceRate, quizAverage });
@@ -206,78 +201,107 @@ export async function POST(request: Request) {
       skillRecords.map((skill) => skill.name),
       offers,
     );
-    const { webhookUrl, webhookSecret } = getN8nEnvironment();
-    const webhookResponse = await fetch(webhookUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-ODC-Webhook-Secret": webhookSecret,
+    const analysisContext: EmployabilityAnalysisContext = {
+      learner: {
+        id: learner.id,
+        fullName: profile?.full_name ?? "Unnamed learner",
+        programName: program?.name ?? null,
       },
-      body: JSON.stringify({
-        version: "1.0",
-        requestedAt: new Date().toISOString(),
-        learner: {
-          id: learner.id,
-          code: learner.learner_code,
-          fullName: profile?.full_name ?? "Unnamed learner",
-          email: profile?.email ?? null,
-          programName: program?.name ?? null,
-        },
-        metrics: {
-          attendanceRate,
-          quizAverage,
-          projectScore,
-          technicalSkillsAverage,
-          engagementScore,
-          employabilityScore,
-          dropoutRisk: dropoutRisk.level,
-        },
-        skills: skillRecords.map((skill) => ({
-          name: skill.name,
-          category: skill.category,
-          proficiencyLevel: Number(skill.proficiency_level),
-        })),
-        companyMatches,
-      }),
-      cache: "no-store",
-      signal: AbortSignal.timeout(25_000),
-    });
+      metrics: {
+        attendanceRate,
+        quizAverage,
+        projectAverage,
+        technicalSkillsAverage,
+        engagementScore,
+        employabilityScore,
+        dropoutRisk: dropoutRisk.level,
+      },
+      skills: skillRecords.map((skill) => ({
+        name: skill.name,
+        category: skill.category,
+        proficiencyLevel: Number(skill.proficiency_level),
+      })),
+      companyMatches,
+    };
+    const generated = await generateEmployabilityAnalysis(analysisContext);
+    const generatedAt = new Date().toISOString();
+    const analysisRow = {
+      learner_id: learnerId,
+      analysis_type: "employability",
+      status: "completed",
+      employability_score: employabilityScore,
+      summary: generated.analysis.learnerSummary,
+      strengths: generated.analysis.strengths,
+      weaknesses: generated.analysis.weaknesses,
+      recommendations: [generated.analysis.employabilityRecommendation],
+      recommended_career_path: generated.analysis.recommendedCareerPath,
+      skills_to_improve: generated.analysis.skillsToImprove,
+      employability_recommendation:
+        generated.analysis.employabilityRecommendation,
+      matched_offer_ids: companyMatches.map((match) => match.offerId),
+      model_name: generated.model,
+      workflow_run_id: generated.responseId,
+      error_message: null,
+      generated_at: generatedAt,
+    };
+    const savedResult = await supabase
+      .from("ai_analyses")
+      .upsert(analysisRow, { onConflict: "learner_id,analysis_type" })
+      .select("id, generated_at")
+      .single();
 
-    if (!webhookResponse.ok) {
-      console.error("n8n webhook failed with status:", webhookResponse.status);
+    if (savedResult.error) {
+      console.error("AI analysis persistence failed:", savedResult.error.message);
       return NextResponse.json(
-        { error: "The AI workflow failed. Please try again." },
-        { status: 502 },
-      );
-    }
-
-    const webhookPayload: unknown = await webhookResponse.json().catch(() => null);
-
-    if (!isSuccessfulWebhookPayload(webhookPayload)) {
-      console.error("n8n webhook returned an invalid success response.");
-      return NextResponse.json(
-        { error: "The AI workflow returned an invalid response." },
-        { status: 502 },
+        { error: "Analysis generated but could not be saved." },
+        { status: 500 },
       );
     }
 
     return NextResponse.json({
       success: true,
-      learnerId,
-      message: "Employability analysis generated successfully.",
+      analysis_id: savedResult.data.id,
+      learner_id: learnerId,
+      metrics: {
+        attendance_rate: attendanceRate,
+        quiz_average: quizAverage,
+        project_average: projectAverage,
+        engagement_score: engagementScore,
+        employability_score: employabilityScore,
+        dropout_risk: dropoutRisk.level,
+      },
+      company_matches: companyMatches,
+      analysis: generated.analysis,
+      generated_at: savedResult.data.generated_at,
     });
   } catch (error) {
-    if (error instanceof Error && error.name === "TimeoutError") {
+    if (error instanceof OpenAI.APIError) {
+      console.error("OpenAI API error:", error.status, error.message);
+
+      if (error.status === 401) {
+        return NextResponse.json(
+          { error: "OpenAI credentials are not configured correctly." },
+          { status: 503 },
+        );
+      }
+
+      if (error.status === 429) {
+        return NextResponse.json(
+          { error: "OpenAI rate limit or quota exceeded. Try again later." },
+          { status: 429 },
+        );
+      }
+
       return NextResponse.json(
-        { error: "The AI workflow timed out. Please try again." },
-        { status: 504 },
+        { error: "OpenAI could not generate the analysis." },
+        { status: 502 },
       );
     }
 
     console.error("Unexpected employability API error:", error);
     return NextResponse.json(
-      { error: "The employability workflow is not configured or unavailable." },
-      { status: 503 },
+      { error: "The employability analysis could not be completed." },
+      { status: 500 },
     );
   }
 }

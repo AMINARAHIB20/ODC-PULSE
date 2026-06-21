@@ -17,7 +17,11 @@ export interface AiAnalysisView {
   score: number | null;
   summary: string;
   strengths: string[];
+  weaknesses: string[];
   recommendations: string[];
+  recommendedCareerPath: string | null;
+  skillsToImprove: string[];
+  employabilityRecommendation: string | null;
   generatedLabel: string;
 }
 
@@ -54,7 +58,7 @@ export function AiAnalysisCard({ learnerId, analysis }: AiAnalysisCardProps) {
       const response = await fetch("/api/ai/employability", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ learnerId }),
+        body: JSON.stringify({ learner_id: learnerId }),
       });
       const payload: unknown = await response.json().catch(() => null);
 
@@ -131,11 +135,39 @@ export function AiAnalysisCard({ learnerId, analysis }: AiAnalysisCardProps) {
             </div>
             <div className="grid gap-4 md:grid-cols-2">
               <AnalysisList title="Strengths" items={analysis.strengths} />
+              <AnalysisList title="Weaknesses" items={analysis.weaknesses} />
+              <AnalysisList
+                title="Skills to improve"
+                items={analysis.skillsToImprove}
+              />
               <AnalysisList
                 title="Recommendations"
                 items={analysis.recommendations}
               />
             </div>
+            {(analysis.recommendedCareerPath ||
+              analysis.employabilityRecommendation) && (
+              <div className="grid gap-4 rounded-lg bg-muted p-4 md:grid-cols-2">
+                {analysis.recommendedCareerPath && (
+                  <div>
+                    <p className="text-sm font-medium">Recommended career path</p>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {analysis.recommendedCareerPath}
+                    </p>
+                  </div>
+                )}
+                {analysis.employabilityRecommendation && (
+                  <div>
+                    <p className="text-sm font-medium">
+                      Employability recommendation
+                    </p>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {analysis.employabilityRecommendation}
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         ) : (
           <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">

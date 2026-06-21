@@ -66,7 +66,11 @@ interface AnalysisRecord {
   employability_score: number | null;
   summary: string | null;
   strengths: unknown;
+  weaknesses: unknown;
   recommendations: unknown;
+  recommended_career_path: string | null;
+  skills_to_improve: unknown;
+  employability_recommendation: string | null;
   generated_at: string | null;
   created_at: string;
 }
@@ -162,7 +166,7 @@ async function getLearnerPageData(learnerId: string): Promise<LearnerPageResult>
         supabase
           .from("ai_analyses")
           .select(
-            "employability_score, summary, strengths, recommendations, generated_at, created_at",
+            "employability_score, summary, strengths, weaknesses, recommendations, recommended_career_path, skills_to_improve, employability_recommendation, generated_at, created_at",
           )
           .eq("learner_id", learnerId)
           .eq("analysis_type", "employability")
@@ -269,7 +273,13 @@ async function getLearnerPageData(learnerId: string): Promise<LearnerPageResult>
                   : Number(latestAnalysis.employability_score),
               summary: latestAnalysis.summary ?? "Analysis completed.",
               strengths: toStringList(latestAnalysis.strengths),
+              weaknesses: toStringList(latestAnalysis.weaknesses),
               recommendations: toStringList(latestAnalysis.recommendations),
+              recommendedCareerPath:
+                latestAnalysis.recommended_career_path,
+              skillsToImprove: toStringList(latestAnalysis.skills_to_improve),
+              employabilityRecommendation:
+                latestAnalysis.employability_recommendation,
               generatedLabel: formatAnalysisDate(
                 latestAnalysis.generated_at ?? latestAnalysis.created_at,
               ),
